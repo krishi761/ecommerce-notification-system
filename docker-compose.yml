@@ -1,0 +1,123 @@
+
+services:
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: userdb
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ecommerce
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5431:5432"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: usermq
+      RABBITMQ_DEFAULT_PASS: passwordmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  user-service:
+    build: ./user-service
+    environment:
+      PG_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PG_DATABASE: ecommerce
+      JWT_SECRET: secret-key-1234567890
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+
+  notification-service:
+    build: ./notification-service
+    environment:
+      PG_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PG_DATABASE: ecommerce
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: usermq
+      RABBITMQ_PASS: passwordmq
+      ORDER_PLACED_QUEUE: order_placed_queue
+      ORDER_UPDATES_QUEUE: order_updates_queue
+      ORDER_RECOMMENDATIONS_QUEUE: order_recommendations_queue
+      USER_SERVICE_URL: http://user-service:3001
+    command: sh -c 'while ! nc -z rabbitmq 5672; do sleep 2; done; npm start'
+    ports:
+      - "3002:3002"
+    depends_on:
+      - postgres
+      - rabbitmq
+      - user-service
+      
+
+  recommendation-service:
+    build: ./recommendation-service
+    environment:
+      PG_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PG_DATABASE: ecommerce
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: usermq
+      RABBITMQ_PASS: passwordmq
+      ORDER_PLACED_QUEUE: order_placed_queue
+      ORDER_RECOMMENDATIONS_QUEUE: order_recommendations_queue
+      USER_SERVICE_URL: http://user-service:3001
+    command: sh -c 'while ! nc -z rabbitmq 5672; do sleep 2; done; npm start'
+    ports:
+      - "3003:3003"
+    depends_on:
+      - postgres
+      - rabbitmq
+      - user-service
+
+  order-service:
+    build: ./order-service
+    environment:
+      PG_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PG_DATABASE: ecommerce
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: usermq
+      RABBITMQ_PASS: passwordmq
+      USER_SERVICE_URL: http://user-service:3001
+      ORDER_PLACED_QUEUE: order_placed_queue
+      ORDER_UPDATES_QUEUE: order_updates_queue
+    command: sh -c 'while ! nc -z rabbitmq 5672; do sleep 2; done; npm start'
+    ports:
+      - "3004:3004"
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  graphql-gateway:
+    build: ./graphql-gateway
+    environment:
+      USER_SERVICE_URL: http://user-service:3001
+      NOTIFICATION_SERVICE_URL: http://notification-service:3002
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:3003
+      ORDER_SERVICE_URL: http://order-service:3004
+      JWT_SECRET: secret-key-1234567890
+    ports:
+      - "4000:4000"
+    depends_on:
+      - user-service
+      - notification-service
+      - recommendation-service
+      - order-service
+
+volumes:
+  postgres-data:
